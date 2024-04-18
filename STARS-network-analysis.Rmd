@@ -1,0 +1,396 @@
+---
+title: "STARS-network-analysis"
+author: "A0223190R_Cheryl-Lee"
+date: "2024-04-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+```{r}
+# Loading necessary packages 
+
+library(bootnet) # needed to compute partial correlation matrix
+library(tidyverse) # for data wrangling 
+library(igraph)
+library(igraphdata)
+library(ggplot2)
+
+```
+
+### Loading dataset
+```{r}
+
+# loading dataset 
+
+data <- read.csv('stars-data.csv', header = T)
+
+head(data)
+
+```
+
+### Exploring dataset
+
+```{r}
+
+# filtering data based on "total attitude" medium score of 68.5
+# data1 / anything labelled with "1" moving forward refers to Group A
+# data2 / anything labelled with "2" moving forward refers to Group B
+
+data1 <- data |> filter(total_attitude > 68.5)
+data2 <- data |> filter(total_attitude <= 68.5)
+
+# retain the 51 items for estimating the correlation matrix
+data1 <- data1 |> select(item_1:item_51)
+data2 <- data2 |> select(item_1:item_51)
+
+head(data1)
+head(data2)
+#summary(data)
+
+nrow(data)
+nrow(data1)
+nrow(data2)
+# a total of 64 corresponds with the number of reported responses 
+
+```
+### Estimating a partial correlation matrix 
+
+```{r}
+
+# create partial correlation matrix from the 51 stars items
+# the partial correlation matrix depicts the strengths of association of 2 variables after conditioning on other variables 
+# thresholding is required to allow for meaning analysis (network is fully connected without it)
+
+stars_matrix1 <- estimateNetwork(data1, 
+                                 default = "cor",
+                                 fun = "spearman",
+                                 threshold = "sig",
+                                 nonPositiveDefinite = "continue")
+
+summary(stars_matrix1)
+
+stars_matrix2 <- estimateNetwork(data2, 
+                                 default = "cor",
+                                 fun = "spearman",
+                                 threshold = "sig",
+                                 nonPositiveDefinite = "continue")
+
+
+
+
+summary(stars_matrix2)
+
+# nodes = items (observed variables) on the STARS survey, 51 nodes aligns with the 51 items in the survey
+# edges = strength of association between items from survey responses 
+```
+### Absolutizing 
+
+```{r}
+
+# absolutizing is necessary as certain network measures cannot compute negative values, which are present in the STARS matrix 
+
+# absolutize 
+stars_adj_mat1 <- abs(stars_matrix1$graph)
+stars_adj_mat2 <- abs(stars_matrix2$graph) # extract the matrix for conversion to igraph
+
+min(stars_adj_mat1)
+
+# checking:
+#head(stars_adj_mat1)
+#head(stars_adj_mat2)
+
+# sanity check for whether the matrix is symmetrical 
+isSymmetric.matrix(stars_adj_mat1)
+isSymmetric.matrix(stars_adj_mat2)
+```
+
+### Converting to igraph object 
+
+```{r}
+
+stars_igraph1 <- graph_from_adjacency_matrix(stars_adj_mat1,
+                                            mode = "undirected",
+                                            weighted = TRUE)
+
+stars_igraph2 <- graph_from_adjacency_matrix(stars_adj_mat2,
+                                            mode = "undirected",
+                                            weighted = TRUE)
+# summary of igraph
+summary(stars_igraph1)
+summary(stars_igraph2)
+
+
+
+```
+
+### Visualization 
+```{r}
+# Generating a dataset to differentiate the items based on their subscales 
+subscale <- read.csv("subscale-data.csv", header = T)
+stars_sub <- data.frame(node = 1:gorder(stars_igraph1), subscale = as.numeric(subscale$sub))
+stars_sub
+```
+
+
+```{r}
+l_a <- layout_with_fr(stars_igraph1)
+l_b <- layout_with_fr(stars_igraph2)
+
+par(mar=c(0,0,1,0))
+    
+# plotting both networks
+set.seed(1234)
+
+
+#plotting graph of Group A
+plot(stars_igraph1,
+     main = "Group A",
+vertex.color= stars_sub$subscale,
+vertex.label = NA,
+vertex.size = 15,
+vertex.frame.color = 'white',
+edge.width = E(stars_igraph1)$weight,
+edge.color = ifelse(E(stars_igraph1)$weight > 0.436, "#35f060", "#f03535"),
+layout = l_a)
+
+legend("topleft",
+       c("Worth of Statistics", "Interpretation Anxiety", "Test and Class Anxiety","Computation self-concept","Ask for help", "Fear of statistics"),
+      pt.b = c("#ede67b","#6dbbf2", "#f5aa5f", "#c44314", "#22a369", "#2462ad"),
+       pch = 21,
+       cex = 0.75,
+       bty = "n",
+       title = "STARS subscales")
+```
+
+
+```{r}
+par(mar=c(0,0,1,0))
+
+set.seed(1234)
+
+#plotting graph of Group B
+plot(stars_igraph2,
+     main = "Group B",
+vertex.color= stars_sub$subscale,
+vertex.label = NA,
+vertex.size = 15,
+vertex.frame.color = 'white',
+edge.width = E(stars_igraph1)$weight,
+edge.color =ifelse(E(stars_igraph1)$weight > 0.436, "#35f060", "#f03535"),
+layout = l_b)
+
+legend("topleft",
+       c("Worth of Statistics", "Interpretation Anxiety", "Test and Class Anxiety","Computation self-concept","Ask for help", "Fear of statistics"),
+      pt.b = c("#ede67b","#6dbbf2", "#f5aa5f", "#c44314", "#22a369", "#2462ad"),
+       pch = 21,
+       cex = 0.75,
+       bty = "n",
+       title = "STARS subscales")
+```
+
+
+
+
+### Micro-measures 
+
+#### Strength 
+
+```{r}
+# obtaining the strength of nodes, which refers to sum of their adjacent edge weights
+strength_results1 <- strength(stars_igraph1)
+strength_results2 <- strength(stars_igraph2)
+
+# sorting top three nodes with greatest strengths 
+strength_results1 |> sort(decreasing = T) |> head(5)
+strength_results2 |> sort(decreasing = T) |> head(5)
+
+```
+
+#### Closeness centrality 
+
+```{r}
+# obtaining inverse of average shortest path of nodes 
+closeness_results1 <- closeness(stars_igraph1, normalized = T)
+closeness_results2 <- closeness(stars_igraph2, normalized = T)# weights are automatically considered (but in the distance method)
+
+closeness_results1 |> sort(decreasing = T) |> head(5)
+closeness_results2 |> sort(decreasing = T) |> head(5)
+
+```
+
+#### Betweenness centrality
+ 
+```{r}
+# obtaining the measure of degree to which nodes stand in between each other
+betweenness_results1 <- betweenness(stars_igraph1, normalized = T, weights = 1/E(stars_igraph1)$weight)
+betweenness_results2 <- betweenness(stars_igraph2, normalized = T, weights = 1/E(stars_igraph2)$weight)
+
+betweenness_results1 |> sort(decreasing = T) |> head(5)
+betweenness_results2 |> sort(decreasing = T) |> head(5)
+```
+
+##### Visualisation
+```{r}
+par(mar=c(0,0,1,0)+.1, mfrow = c(1,2))
+
+set.seed(1234)
+
+l_a <- layout_with_fr(stars_igraph1)
+l_b <- layout_with_fr(stars_igraph2)
+
+#plot for strength in stars_igraph1
+plot(stars_igraph1,
+edge.color = 'grey', layout = l_a, main = 'A - strength',
+vertex.frame.color = 'white',
+vertex.size = strength_results1*2)
+
+#plot for strength in stars_igraph2
+plot(stars_igraph2,
+edge.color = 'grey', layout = l_b, main = 'B - strength',
+vertex.frame.color = 'white',
+vertex.size = strength_results2*2)
+```
+
+
+```{r}
+par(mar=c(0,0,1,0)+.1, mfrow = c(1,2))
+
+set.seed(1234)
+
+#plot for closeness centrality in stars_igraph1
+plot(stars_igraph1,
+edge.color = 'grey', layout = l_a, main = 'A - closeness',
+vertex.frame.color = 'white',
+vertex.size = closeness_results1*15)
+
+#plot for closeness centrality in stars_igraph2
+plot(stars_igraph2,
+edge.color = 'grey', layout = l_b, main = 'B - closeness',
+vertex.frame.color = 'white',
+vertex.size = closeness_results2*15)
+```
+
+
+```{r}
+par(mar=c(0,0,1,0)+.1, mfrow = c(1,2))
+
+set.seed(1234)
+
+#plot for betweenness centrality in stars_igraph1
+plot(stars_igraph1,
+edge.color = 'grey', layout = l_a, main = 'A - betweenness',
+vertex.frame.color = 'white',
+vertex.size = betweenness_results1*300)
+
+#plot for betweenness centrality in stars_igraph2
+plot(stars_igraph2,
+edge.color = 'grey', layout = l_b, main = 'B - betweenness',
+vertex.frame.color = 'white',
+vertex.size = betweenness_results2*300)
+
+
+```
+
+
+#### Local clustering coefficient 
+
+```{r}
+ 
+# obtaining the local clustering coefficient, C, of nodes 
+c_results1 <- transitivity(stars_igraph1, 
+                          type = 'local',
+                          weights = NA,
+                          isolates = 'zero') |> round(3)
+
+names(c_results1) <- V(stars_igraph1)$name # labeling the vector 
+
+c_results2 <- transitivity(stars_igraph2, 
+                          type = 'local',
+                          weights = NA,
+                          isolates = 'zero') |> round(3)
+
+names(c_results2) <- V(stars_igraph2)$name
+
+
+
+#c_results1
+c_results1 |> sort(decreasing = T) |> head(5)
+
+#c_results2
+c_results2 |> sort(decreasing = T) |> head(5)
+
+
+
+```
+```{r}
+# visualisation for local clustering
+par(mar=c(0,0,1,0)+.1, mfrow = c(1,2))
+
+set.seed(1234)
+
+#plot for LCC in stars_igraph1
+plot(stars_igraph1,
+edge.color = 'grey', layout = l_a, main = 'A - local clustering',
+vertex.frame.color = 'white',
+vertex.size = c_results1*20)
+
+#plot for LCC in stars_igraph2
+plot(stars_igraph2,
+edge.color = 'grey', layout = l_b, main = 'B - local clustering',
+vertex.frame.color = 'white',
+vertex.size = c_results2*20)
+```
+
+
+### Community detection methods 
+
+#### Louvain method 
+
+```{r}
+set.seed(1234)
+
+stars_louvain1 <- cluster_louvain(stars_igraph1, weights = E(stars_igraph1)$weight)  
+stars_louvain2 <- cluster_louvain(stars_igraph2, weights = E(stars_igraph2)$weight) 
+
+# membership of nodes in each community 
+stars_louvain_membership1 <- data.frame(node = 1:gorder(stars_igraph1), community = stars_louvain1$membership)
+stars_louvain_membership2 <- data.frame(node = 1:gorder(stars_igraph2), community = stars_louvain2$membership)
+
+table(stars_louvain_membership1$community) 
+# there are 4 communities detected. Size of largest = 15. Size of smallest = 10.
+table(stars_louvain_membership2$community) 
+# there are 3 communities detected. Size of largest = 21. Size of smallest= 10.
+
+
+modularity(stars_louvain1)
+modularity(stars_louvain2)
+```
+
+
+
+```{r}
+par(mar=c(0,0,1,0)+.1, mfrow = c(1,2))
+
+set.seed(1234)
+
+#plotting communities of Group A
+plot(stars_igraph1,
+     main = 'Group A',
+vertex.color= stars_louvain_membership1$community,
+vertex.size = 15,
+vertex.frame.color = 'white',
+layout = l_a)
+
+#plotting communities of Group B
+plot(stars_igraph2,
+     main = 'Group B',
+vertex.color= stars_louvain_membership2$community,
+vertex.size = 15,
+vertex.frame.color = 'white',
+layout = l_b)
+
+```
+
